@@ -1,32 +1,37 @@
 """Dummy kiosk for touch/display testing -- NO bot, models, camera or .env.
 
-Same 800x480 layout and buttons as ui_kiosk.py, but every tap just cycles the
-theme colour so you can confirm the touchscreen works end-to-end before the
-real backend is wired up. Run under cage exactly like the real UI:
+A diagnostic, not a demo. It answers two questions:
+  1. Does the touch land WHERE you press?  -> a dot is drawn at the exact tap
+     point, and the raw x,y is shown. If the dot is under your finger, the
+     position (and calibration) is right.
+  2. Which button did it hit?  -> only the button you actually touched lights
+     up and its name is shown. If you press TALK and "Cam" lights, the axes
+     need swap/invert in the ads7846 overlay.
 
+Run under cage exactly like the real UI:
     sudo chvt 3
     cage -- .venv/bin/python ui_dummy.py        # on the Pi
     UI_WINDOWED=1 python ui_dummy.py             # windowed, on a PC
+Press Esc to quit.
 """
 import os
 
 import pygame
 
 W, H = 800, 480
+BG = (14, 16, 22)
+PANEL = (22, 26, 36)
+ACCENT = (90, 170, 255)
+HIT = (255, 90, 120)       # the button you actually touched
+DOT = (90, 220, 140)       # marker at the raw touch point
 TXT = (230, 234, 240)
 TXT_DIM = (140, 150, 165)
-# tap cycles through these (bg, panel, accent) themes
-THEMES = [
-    ((14, 16, 22), (22, 26, 36), (90, 170, 255)),    # blue
-    ((22, 14, 20), (36, 22, 30), (255, 90, 120)),    # red
-    ((14, 20, 16), (22, 34, 26), (90, 220, 140)),    # green
-    ((20, 18, 12), (34, 30, 22), (250, 190, 60)),    # amber
-    ((18, 14, 22), (30, 22, 36), (180, 120, 255)),   # violet
-]
 
-TALK = pygame.Rect(20, 400, 360, 64)
-CAM = pygame.Rect(400, 400, 180, 64)
-TYPE = pygame.Rect(600, 400, 180, 64)
+BUTTONS = [
+    ("TALK", pygame.Rect(20, 400, 360, 64)),
+    ("Cam", pygame.Rect(400, 400, 180, 64)),
+    ("Type", pygame.Rect(600, 400, 180, 64)),
+]
 
 
 def _open_display():
@@ -50,14 +55,10 @@ def main():
     screen = _open_display()
     font = pygame.font.SysFont("dejavusans", 20)
     font_b = pygame.font.SysFont("dejavusans", 26, bold=True)
-    theme = 0
-    taps = 0
 
-    def button(rect, label, accent):
-        pygame.draw.rect(screen, THEMES[theme][1], rect, border_radius=12)
-        pygame.draw.rect(screen, accent, rect, 2, border_radius=12)
-        t = font_b.render(label, True, accent)
-        screen.blit(t, t.get_rect(center=rect.center))
+    last_pos = None       # (x, y) of the most recent tap
+    last_hit = None       # label of the button hit, or None
+    taps = 0
 
     clock = pygame.time.Clock()
     running = True
@@ -68,19 +69,35 @@ def main():
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
             elif e.type == pygame.MOUSEBUTTONDOWN:   # a tap (touch or mouse)
-                theme = (theme + 1) % len(THEMES)    # change colours
+                last_pos = e.pos
+                last_hit = next((lbl for lbl, r in BUTTONS
+                                 if r.collidepoint(e.pos)), None)
                 taps += 1
 
-        bg, panel, accent = THEMES[theme]
-        screen.fill(bg)
-        pygame.draw.rect(screen, panel, pygame.Rect(20, 20, 760, 344),
+        screen.fill(BG)
+        pygame.draw.rect(screen, PANEL, pygame.Rect(20, 20, 760, 344),
                          border_radius=14)
-        screen.blit(font.render("DUMMY MODE - tap anywhere to change colour",
+        screen.blit(font.render("TOUCH TEST - a dot marks where you touched",
                                 True, TXT), (40, 60))
-        screen.blit(font.render(f"taps: {taps}", True, TXT_DIM), (40, 100))
-        button(TALK, "TALK", accent)
-        button(CAM, "Cam", accent)
-        button(TYPE, "Type", accent)
+        pos_txt = f"last tap: {last_pos}" if last_pos else "last tap: (none yet)"
+        screen.blit(font.render(pos_txt, True, TXT_DIM), (40, 100))
+        screen.blit(font.render(f"hit button: {last_hit or '-'}", True, TXT_DIM),
+                    (40, 130))
+        screen.blit(font.render(f"taps: {taps}", True, TXT_DIM), (40, 160))
+
+        # buttons -- only the one you touched is highlighted
+        for lbl, r in BUTTONS:
+            colour = HIT if lbl == last_hit else ACCENT
+            pygame.draw.rect(screen, PANEL, r, border_radius=12)
+            pygame.draw.rect(screen, colour, r, 3, border_radius=12)
+            t = font_b.render(lbl, True, colour)
+            screen.blit(t, t.get_rect(center=r.center))
+
+        # dot at the exact touch point -- should sit under your finger
+        if last_pos:
+            pygame.draw.circle(screen, DOT, last_pos, 10)
+            pygame.draw.circle(screen, BG, last_pos, 4)
+
         pygame.display.flip()
         clock.tick(20)
     pygame.quit()
