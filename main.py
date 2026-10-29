@@ -38,7 +38,8 @@ def load_cfg():
     # .env overrides real environment overrides defaults.
     cfg = dict(DEFAULTS)
     cfg.update({k: v for k, v in os.environ.items() if k in DEFAULTS})
-    cfg.update({k: v for k, v in dotenv_values(".env").items() if v is not None})
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    cfg.update({k: v for k, v in dotenv_values(env_path).items() if v is not None})
     return cfg
 
 
