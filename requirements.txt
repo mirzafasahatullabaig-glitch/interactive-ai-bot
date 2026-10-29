@@ -1,0 +1,3 @@
+openai>=1.40
+opencv-python>=4.10
+python-dotenv>=1.0
