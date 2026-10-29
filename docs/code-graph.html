@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>interactive-ai-bot — code graph</title>
+<style>
+  :root{
+    --bg:#0d0f14; --surface:#161923; --surface2:#1c2030; --border:#252a3a;
+    --text:#e6e8ec; --text2:#9aa3b2; --text3:#6b7280; --hc:#845ef7;
+    --l0:#5d6478; --l1:#845ef7; --l2:#ff6b6b; --l3:#fab005;
+    --l4:#20c997; --l5:#4dabf7; --l6:#e64980; --l7:#868e96;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.5}
+  .layout{display:flex;height:100vh}
+  main{flex:1;overflow-y:auto;padding:24px 28px;position:relative}
+  #edges{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible}
+  #edges path{fill:none;stroke:var(--border);stroke-width:1.2;opacity:.3;transition:.15s}
+  #edges path.hi-out{stroke:var(--hc);stroke-width:2;opacity:.95}
+  #edges path.hi-in{stroke:var(--hc);stroke-width:1.6;opacity:.7;stroke-dasharray:4 3}
+  #edges path.dim{opacity:.04}
+  .content{position:relative;z-index:2}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:8px}
+  .hint{color:var(--text3);font-size:11.5px;margin-bottom:18px}
+  .hint b{color:var(--text2)}
+  .lane{margin-bottom:20px;border-left:3px solid var(--lc);padding-left:14px}
+  .lane-h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--lc);margin-bottom:2px}
+  .lane-sub{color:var(--text3);font-size:11.5px;margin-bottom:10px}
+  .nodes{display:flex;flex-wrap:wrap;gap:8px}
+  .node{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;cursor:pointer;transition:.12s;min-width:0;position:relative}
+  .node:hover{border-color:var(--lc);background:var(--surface2)}
+  .node.sel{border-color:var(--lc);background:var(--surface2);box-shadow:0 0 0 2px var(--lc)}
+  .node.neigh-out{border-color:var(--hc)}
+  .node.neigh-in{border-color:var(--hc);border-style:dashed}
+  .node.faded{opacity:.28}
+  .node .lbl{font-family:"SFMono-Regular",Menlo,monospace;font-size:12.5px}
+  .node .deg{color:var(--text3);font-size:10.5px;margin-top:2px}
+  aside{width:390px;border-left:1px solid var(--border);background:var(--surface);overflow-y:auto;padding:22px 20px;z-index:3}
+  .p-empty{color:var(--text3);font-size:13px;line-height:1.7}
+  .p-file{font-family:monospace;font-size:11px;color:var(--text3);word-break:break-all;margin-bottom:12px}
+  .p-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin:14px 0 4px}
+  .p-val{font-size:13.5px;line-height:1.6}
+  .p-deg{display:flex;gap:16px;margin:10px 0 4px}
+  .p-deg span{font-size:12px;color:var(--text2)}
+  .p-deg b{color:var(--text);font-size:15px}
+  .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;background:var(--lc);color:#0d0f14}
+  .rel{font-size:12px;color:var(--text2);margin:3px 0;cursor:pointer}
+  .rel:hover{color:var(--text)}
+  .rel .arrow{color:var(--text3);font-family:monospace}
+  .rel .rt{color:var(--text3);font-size:10px;margin-left:4px}
+  .warn{background:#2a1e14;border-left:3px solid var(--l3);padding:10px 12px;border-radius:6px;font-size:12.5px;margin-top:16px;color:#ffd8a8}
+  .clr{float:right;font-size:11px;color:var(--text3);cursor:pointer;border:1px solid var(--border);border-radius:5px;padding:2px 8px}
+  .clr:hover{color:var(--text)}
+  .searchbar{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  #search{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:9px 12px;outline:none}
+  #search:focus{border-color:var(--l1)}
+  .scount{font-size:11.5px;color:var(--text3);white-space:nowrap}
+  .cbox{font-size:11.5px;color:var(--text2);display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
+  .results{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+  .results:empty{display:none}
+  .rchip{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;font-family:"SFMono-Regular",Menlo,monospace;font-size:12px;display:flex;align-items:center;gap:6px}
+  .rchip:hover{border-color:var(--l1)}
+  .rchip .rlayer{width:8px;height:8px;border-radius:2px}
+  .rchip .rfile{color:var(--text3);font-size:10px}
+  .node .dot{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:#3a4152}
+  .node.curated .dot{background:#20c997}
+  .node.hit{outline:2px solid var(--l1);outline-offset:1px}
+  .node.hidden{display:none}
+  .filterbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .fl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3)}
+  .fchip{font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text3);cursor:pointer;display:inline-flex;align-items:center;gap:5px;user-select:none}
+  .fchip.on{color:var(--text);border-color:var(--fc);background:color-mix(in srgb, var(--fc) 16%, var(--surface))}
+  .fchip .fdot{width:8px;height:8px;border-radius:2px;background:var(--fc)}
+  .fchip:not(.on) .fdot{opacity:.3}
+  .btn{font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text3);cursor:pointer}
+  .btn:hover{color:var(--text);border-color:var(--l1)}
+  .lane.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="layout">
+  <main>
+    <svg id="edges"></svg>
+    <div class="content">
+      <h1>interactive-ai-bot — code graph</h1>
+      <div class="sub">17 units across 3 files · cloud→local AI routing with webcam observation · v0.3.0</div>
+      <div class="hint">Las lineas son las dependencias reales entre nodos. Click en un nodo: <b>solidas</b> = lo que ese nodo usa, <b>punteadas</b> = quien lo usa.</div>
+      <div class="searchbar">
+        <input id="search" type="text" placeholder="Buscar nodo por nombre o archivo…" autocomplete="off">
+        <span id="searchcount" class="scount"></span>
+        <label class="cbox"><input type="checkbox" id="onlyuncurated"> solo sin curar</label>
+      </div>
+      <div class="filterbar">
+        <span class="fl">Capas</span>
+        <span id="layerchips"></span>
+        <span class="fl" style="margin-left:14px">Aristas</span>
+        <span id="relchips"></span>
+        <span class="btn" id="resetfilters">Reset</span>
+      </div>
+      <div id="results" class="results"></div>
+      <div id="lanes"></div>
+    </div>
+  </main>
+  <aside id="panel">
+    <div class="p-empty" id="panel-empty">Selecciona un nodo para ver su rol y resaltar sus conexiones.</div>
+  </aside>
+</div>
+
+<script id="data" type="application/json">{"nodes": [{"id": "main", "label": "main()", "file": "main.py", "layer": "L0", "in": 0, "out": 5}, {"id": "load_cfg", "label": "load_cfg()", "file": "main.py", "layer": "L0", "in": 1, "out": 0}, {"id": "Bot", "label": "Bot.__init__", "file": "bot.py", "layer": "L1", "in": 1, "out": 2}, {"id": "chat", "label": "Bot.chat", "file": "bot.py", "layer": "L1", "in": 1, "out": 2}, {"id": "open_text", "label": "_open_text_stream", "file": "bot.py", "layer": "L1", "in": 1, "out": 2}, {"id": "stream_one", "label": "_stream_one", "file": "bot.py", "layer": "L1", "in": 1, "out": 1}, {"id": "analyze_image", "label": "analyze_image", "file": "bot.py", "layer": "L1", "in": 2, "out": 2}, {"id": "vision_cloud", "label": "_try_vision_cloud", "file": "bot.py", "layer": "L1", "in": 1, "out": 1}, {"id": "vision_local", "label": "_try_vision_local", "file": "bot.py", "layer": "L1", "in": 1, "out": 1}, {"id": "manual_cam", "label": "manual_cam (/cam)", "file": "bot.py", "layer": "L1", "in": 1, "out": 2}, {"id": "warm_local", "label": "_warm_local", "file": "bot.py", "layer": "L1", "in": 1, "out": 0}, {"id": "capture", "label": "capture_jpeg", "file": "bot.py", "layer": "L2", "in": 2, "out": 1}, {"id": "open_cam", "label": "_open_cam", "file": "bot.py", "layer": "L2", "in": 1, "out": 0}, {"id": "scene_changed", "label": "scene_changed", "file": "bot.py", "layer": "L2", "in": 1, "out": 0}, {"id": "observe_tick", "label": "_observe_tick", "file": "bot.py", "layer": "L2", "in": 1, "out": 5}, {"id": "schedule", "label": "_schedule", "file": "bot.py", "layer": "L2", "in": 2, "out": 1}, {"id": "UsageStore", "label": "UsageStore", "file": "usage_store.py", "layer": "L2", "in": 7, "out": 0}], "edges": [{"s": "main", "t": "load_cfg", "r": "calls"}, {"s": "main", "t": "Bot", "r": "constructs"}, {"s": "main", "t": "chat", "r": "calls"}, {"s": "main", "t": "manual_cam", "r": "calls (/cam)"}, {"s": "main", "t": "schedule", "r": "start/stop observe"}, {"s": "Bot", "t": "warm_local", "r": "calls"}, {"s": "Bot", "t": "UsageStore", "r": "constructs"}, {"s": "chat", "t": "open_text", "r": "calls"}, {"s": "chat", "t": "UsageStore", "r": "reads history"}, {"s": "open_text", "t": "stream_one", "r": "calls"}, {"s": "open_text", "t": "UsageStore", "r": "cooldown check"}, {"s": "stream_one", "t": "UsageStore", "r": "record()"}, {"s": "manual_cam", "t": "capture", "r": "calls"}, {"s": "manual_cam", "t": "analyze_image", "r": "calls"}, {"s": "analyze_image", "t": "vision_cloud", "r": "calls"}, {"s": "analyze_image", "t": "vision_local", "r": "fallback"}, {"s": "vision_cloud", "t": "UsageStore", "r": "record()"}, {"s": "vision_local", "t": "UsageStore", "r": "record()"}, {"s": "capture", "t": "open_cam", "r": "calls"}, {"s": "observe_tick", "t": "capture", "r": "calls"}, {"s": "observe_tick", "t": "scene_changed", "r": "calls"}, {"s": "observe_tick", "t": "analyze_image", "r": "calls"}, {"s": "observe_tick", "t": "UsageStore", "r": "budget check"}, {"s": "observe_tick", "t": "schedule", "r": "reschedules"}, {"s": "schedule", "t": "observe_tick", "r": "timer fires"}]}</script>
+<script id="curation" type="application/json">{"main.py": {"what": "Terminal REPL: reads a line, dispatches /cam /observe /status /quit, else streams a chat reply chunk-by-chunk. load_cfg layers .env over real env over hardcoded DEFAULTS.", "why": "Keeps the whole UI in one tiny loop so the controller (Bot) stays headless and testable; config precedence lets you override any knob without editing code.", "gotcha": "Reads stdin -> can't run unattended as-is. A Pi systemd service needs an observe-only non-interactive mode (see docs/PI_PORT.md)."}, "bot.py": {"what": "The controller. THREE responsibilities: (1) text routing chat->_open_text_stream->_stream_one, cloud models left-to-right then Ollama, streaming with first-chunk fast-fail; (2) vision analyze_image->_try_vision_cloud then _try_vision_local; (3) camera+observation: capture_jpeg/_open_cam (DSHOW), scene_changed (grayscale diff), _observe_tick on a repeating threading.Timer under an hourly budget.", "why": "Both OmniRoute and Ollama are OpenAI-compatible, so one SDK talks to both and only base_url/key/model differ -- that single assumption is why fallback is a few lines, not an adapter layer. First-chunk-then-fall-through means a dead free route never half-prints a wrong-provider answer.", "gotcha": "_open_cam hardcodes cv2.CAP_DSHOW (Windows-only) -- the one line that must change for the Pi. Timer threads touch the camera under _cam_lock; scene_changed mutates _prev_gray as a side effect."}, "usage_store.py": {"what": "SQLite-backed call log. record() every attempt (ok/fail, source, tokens), in_cooldown() skips a model for COOLDOWN_SEC after a temporary error, observations_last_hour() enforces the automatic-vision budget, summary() feeds /status.", "why": "Persisting to SQLite (not memory) means cooldowns and the hourly budget survive restarts, so a flapping free route stays benched across runs instead of being hammered again on every launch.", "gotcha": "The hourly budget is a rolling-window count read from the DB on each tick; clock changes or a wiped DB reset it."}}</script>
+<script>
+const DATA = JSON.parse(document.getElementById('data').textContent);
+const CUR = JSON.parse(document.getElementById('curation').textContent);
+// Las capas vienen de meta (una por grupo del Paso 4). Cada {id, name, sub}.
+// El color se asigna por indice desde la paleta, no fijo — asi sirve con cualquier
+// numero de capas. NADA especifico de un proyecto se hardcodea aqui (ver Paso 7b).
+const LAYER_PALETTE = ['--l0','--l1','--l2','--l3','--l4','--l5','--l6','--l7'];
+const LAYERS = ([{"id": "L0", "name": "Interface / entry", "sub": "REPL + command dispatch"}, {"id": "L1", "name": "Routing & fallback", "sub": "text/vision, cloud->local"}, {"id": "L2", "name": "I/O & state", "sub": "camera, scheduler, usage store"}]).map((l, i) => ({ ...l, c: LAYER_PALETTE[i % LAYER_PALETTE.length] }));
+const byId = Object.fromEntries(DATA.nodes.map(n=>[n.id,n]));
+const layerColor = id => `var(${(LAYERS.find(l=>l.id===id)||LAYERS[0]).c})`;
+const esc = s => String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Nombres genericos (index.js, styles.js...) no dicen a que se refieren: los prefijamos con la carpeta padre.
+const GENERIC = new Set(['index.js','index.ios.js','index.android.js','styles.js','package.json','actions.js','reducer.js']);
+const displayLabel = n => {
+  if(!GENERIC.has(n.label)) return n.label;
+  const parts = n.file.split('/');
+  const parent = parts.length>=2 ? parts[parts.length-2] : '';
+  return parent ? `${parent}/${n.label}` : n.label;
+};
+const nodeEls = {};
+const outMap = {}, inMap = {};
+DATA.edges.forEach(e=>{ (outMap[e.s]=outMap[e.s]||[]).push(e); (inMap[e.t]=inMap[e.t]||[]).push(e); });
+
+const lanesEl = document.getElementById('lanes');
+LAYERS.forEach(L=>{
+  const ns = DATA.nodes.filter(n=>n.layer===L.id).sort((a,b)=>b.out-a.out);
+  if(!ns.length) return;
+  const lane = document.createElement('div');
+  lane.className='lane'; lane.dataset.layer=L.id; lane.style.setProperty('--lc',`var(${L.c})`);
+  lane.innerHTML = `<div class="lane-h">${L.id} · ${L.name}</div><div class="lane-sub">${L.sub}</div>`;
+  const wrap = document.createElement('div'); wrap.className='nodes';
+  ns.forEach(n=>{
+    const el = document.createElement('div');
+    const isCur = !!(CUR[n.file] && CUR[n.file].what);
+    el.className='node'+(isCur?' curated':''); el.style.setProperty('--lc',`var(${L.c})`); el.dataset.id=n.id;
+    el.innerHTML=`<span class="dot" title="${isCur?'curado':'sin curar'}"></span><div class="lbl">${esc(displayLabel(n))}</div><div class="deg">in ${n.in} · out ${n.out}</div>`;
+    el.onclick=(ev)=>{ev.stopPropagation();select(n.id);};
+    wrap.appendChild(el); nodeEls[n.id]=el;
+  });
+  lane.appendChild(wrap); lanesEl.appendChild(lane);
+});
+
+const svg = document.getElementById('edges');
+const SVGNS='http://www.w3.org/2000/svg';
+function drawEdges(){
+  svg.innerHTML='';
+  const main = document.querySelector('main');
+  const ox = main.scrollLeft, oy = main.scrollTop;
+  const base = main.getBoundingClientRect();
+  const box = el => { const r=el.getBoundingClientRect(); return {x:r.left-base.left+ox+r.width/2, top:r.top-base.top+oy, bot:r.top-base.top+oy+r.height}; };
+  DATA.edges.forEach(e=>{
+    const a=nodeEls[e.s], b=nodeEls[e.t]; if(!a||!b) return;
+    const p1=box(a), p2=box(b);
+    let y1, y2;
+    if(p2.top >= p1.bot){ y1=p1.bot; y2=p2.top; }
+    else if(p1.top >= p2.bot){ y1=p1.top; y2=p2.bot; }
+    else { y1=p1.bot; y2=p2.bot; }
+    const dy=Math.abs(y2-y1);
+    const c=Math.min(Math.max(dy*0.4,24),110);
+    const cy1 = y1<=y2 ? y1+c : y1-c;
+    const cy2 = y2>=y1 ? y2-c : y2+c;
+    const path=document.createElementNS(SVGNS,'path');
+    path.setAttribute('d',`M ${p1.x} ${y1} C ${p1.x} ${cy1}, ${p2.x} ${cy2}, ${p2.x} ${y2}`);
+    path.dataset.s=e.s; path.dataset.t=e.t;
+    svg.appendChild(path);
+  });
+  if(curSel) paintPaths(curSel);
+}
+window.addEventListener('load',drawEdges);
+window.addEventListener('resize',()=>{clearTimeout(window._rt);window._rt=setTimeout(drawEdges,150);});
+document.querySelector('main').addEventListener('scroll',()=>{clearTimeout(window._st);window._st=setTimeout(drawEdges,50);});
+
+let curSel=null;
+function paintPaths(id){
+  const hc=layerColor(byId[id].layer);
+  document.documentElement.style.setProperty('--hc',hc);
+  svg.querySelectorAll('path').forEach(p=>{
+    p.classList.remove('hi-out','hi-in','dim');
+    if(p.dataset.s===id) p.classList.add('hi-out');
+    else if(p.dataset.t===id) p.classList.add('hi-in');
+    else p.classList.add('dim');
+  });
+}
+// Ejemplos generados desde los datos (top-3 por out) — nunca hardcodeados.
+function emptyPanelHTML(){
+  const top = [...DATA.nodes].sort((a,b)=>b.out-a.out).slice(0,3)
+    .map(n=>`<b>${esc(displayLabel(n))}</b> (out ${n.out})`).join(', ');
+  const hint = top ? `<br><br>Empieza por los de mayor <b>out</b>: ${top}.` : '';
+  return `<div class="p-empty">Selecciona un nodo para ver su rol y resaltar sus conexiones.${hint}</div>`;
+}
+function clearSel(){
+  curSel=null;
+  Object.values(nodeEls).forEach(el=>el.classList.remove('sel','neigh-out','neigh-in','faded'));
+  svg.querySelectorAll('path').forEach(p=>p.classList.remove('hi-out','hi-in','dim'));
+  document.getElementById('panel').innerHTML=emptyPanelHTML();
+}
+document.querySelector('main').addEventListener('click',clearSel);
+
+function select(id){
+  curSel=id;
+  const n=byId[id], hc=layerColor(n.layer);
+  const outs=outMap[id]||[], ins=inMap[id]||[];
+  const neighOut=new Set(outs.map(e=>e.t)), neighIn=new Set(ins.map(e=>e.s));
+  Object.entries(nodeEls).forEach(([nid,el])=>{
+    el.classList.remove('sel','neigh-out','neigh-in','faded');
+    el.style.setProperty('--hc',hc);
+    if(nid===id) el.classList.add('sel');
+    else if(neighOut.has(nid)) el.classList.add('neigh-out');
+    else if(neighIn.has(nid)) el.classList.add('neigh-in');
+    else el.classList.add('faded');
+  });
+  paintPaths(id);
+  renderPanel(n,outs,ins);
+}
+
+function renderPanel(n,outs,ins){
+  const cur=CUR[n.file]||{};
+  const L=LAYERS.find(l=>l.id===n.layer)||LAYERS[0];
+  let h=`<span class="clr" onclick="clearSel()">✕ limpiar</span><span class="badge" style="--lc:var(${L.c})">${L.id} · ${L.name}</span>`;
+  h+=`<div class="p-file" style="margin-top:10px">${esc(n.file)}</div>`;
+  h+=`<div class="p-deg"><span><b>${n.in}</b> lo usan</span><span><b>${n.out}</b> usa</span></div>`;
+  if(cur.what){ h+=`<div class="p-lbl">Que hace</div><div class="p-val">${esc(cur.what)}</div>`; }
+  if(cur.why){ h+=`<div class="p-lbl">Por que</div><div class="p-val">${esc(cur.why)}</div>`; }
+  if(cur.gotcha){ h+=`<div class="warn">${esc(cur.gotcha)}</div>`; }
+  if(!cur.what){ h+=`<div class="warn">Nodo sin curar todavia. Su descripcion (que hace / por que) se escribe leyendo el archivo.</div>`; }
+  if(outs.length){ h+=`<div class="p-lbl">Usa (${outs.length})</div>`+outs.map(e=>{const o=byId[e.t];return o?`<div class="rel" onclick="select('${o.id}')"><span class="arrow">→</span> ${esc(displayLabel(o))}<span class="rt">${e.r}</span></div>`:'';}).join(''); }
+  if(ins.length){ h+=`<div class="p-lbl">Lo usan (${ins.length})</div>`+ins.map(e=>{const o=byId[e.s];return o?`<div class="rel" onclick="select('${o.id}')"><span class="arrow">←</span> ${esc(displayLabel(o))}<span class="rt">${e.r}</span></div>`:'';}).join(''); }
+  document.getElementById('panel').innerHTML=h;
+}
+
+// ── Buscador ──────────────────────────────────────────────────
+const isCurated = n => !!(CUR[n.file] && CUR[n.file].what);
+const totalCurated = DATA.nodes.filter(isCurated).length;
+const searchEl = document.getElementById('search');
+const resultsEl = document.getElementById('results');
+const countEl = document.getElementById('searchcount');
+const onlyUncEl = document.getElementById('onlyuncurated');
+
+function updateCount(){
+  countEl.textContent = `${totalCurated}/${DATA.nodes.length} curados`;
+}
+function jumpTo(id){
+  const el = nodeEls[id]; if(!el) return;
+  Object.values(nodeEls).forEach(e=>e.classList.remove('hit'));
+  el.classList.add('hit');
+  el.scrollIntoView({behavior:'smooth', block:'center'});
+  select(id);
+}
+function runSearch(){
+  const q = searchEl.value.trim().toLowerCase();
+  const onlyUnc = onlyUncEl.checked;
+  resultsEl.innerHTML='';
+  if(!q && !onlyUnc){ return; }
+  let matches = DATA.nodes.filter(n=>{
+    const hit = !q || n.label.toLowerCase().includes(q) || n.file.toLowerCase().includes(q);
+    const unc = !onlyUnc || !isCurated(n);
+    return hit && unc;
+  }).sort((a,b)=>b.out-a.out).slice(0,40);
+  matches.forEach(n=>{
+    const chip=document.createElement('div'); chip.className='rchip';
+    chip.innerHTML=`<span class="rlayer" style="background:${layerColor(n.layer)}"></span>${esc(displayLabel(n))}<span class="dot" style="position:static;width:6px;height:6px;background:${isCurated(n)?'#20c997':'#3a4152'}"></span><span class="rfile">${esc(n.file.replace(/^(core|components)\//,''))}</span>`;
+    chip.onclick=()=>jumpTo(n.id);
+    resultsEl.appendChild(chip);
+  });
+  if(!matches.length){ resultsEl.innerHTML='<div class="rfile" style="padding:4px">Sin resultados</div>'; }
+}
+searchEl.addEventListener('input', runSearch);
+onlyUncEl.addEventListener('change', runSearch);
+updateCount();
+
+// ── Filtros de capa y tipo de arista ──────────────────────────
+const activeLayers = new Set(LAYERS.map(l=>l.id));
+const REL_TYPES = [...new Set(DATA.edges.map(e=>e.r))];
+const activeRels = new Set(REL_TYPES);
+
+function buildFilterChips(){
+  const lc = document.getElementById('layerchips');
+  LAYERS.forEach(L=>{
+    if(!DATA.nodes.some(n=>n.layer===L.id)) return;
+    const c=document.createElement('span'); c.className='fchip on'; c.style.setProperty('--fc',`var(${L.c})`);
+    c.innerHTML=`<span class="fdot"></span>${L.id}·${L.name}`;
+    c.onclick=()=>{ c.classList.toggle('on'); c.classList.contains('on')?activeLayers.add(L.id):activeLayers.delete(L.id); applyFilters(); };
+    lc.appendChild(c);
+  });
+  const rc = document.getElementById('relchips');
+  REL_TYPES.forEach(r=>{
+    const c=document.createElement('span'); c.className='fchip on'; c.style.setProperty('--fc','var(--l1)');
+    c.textContent=r;
+    c.onclick=()=>{ c.classList.toggle('on'); c.classList.contains('on')?activeRels.add(r):activeRels.delete(r); applyFilters(); };
+    rc.appendChild(c);
+  });
+}
+function applyFilters(){
+  // nodos: ocultar los de capas apagadas
+  Object.entries(nodeEls).forEach(([id,el])=>{
+    el.classList.toggle('hidden', !activeLayers.has(byId[id].layer));
+  });
+  // carriles: ocultar el carril entero si su capa esta apagada
+  document.querySelectorAll('.lane').forEach(lane=>{
+    const lid = Number(lane.dataset.layer);
+    lane.classList.toggle('hidden', !activeLayers.has(lid));
+  });
+  // aristas: ocultar las de tipo apagado o que tocan un nodo oculto
+  svg.querySelectorAll('path').forEach(p=>{
+    const e = DATA.edges.find(x=>x.s===p.dataset.s && x.t===p.dataset.t);
+    const relOff = e && !activeRels.has(e.r);
+    const nodeOff = !activeLayers.has(byId[p.dataset.s]?.layer) || !activeLayers.has(byId[p.dataset.t]?.layer);
+    p.style.display = (relOff || nodeOff) ? 'none' : '';
+  });
+  drawEdges();
+}
+document.getElementById('resetfilters').onclick=()=>{
+  LAYERS.forEach(l=>activeLayers.add(l.id)); REL_TYPES.forEach(r=>activeRels.add(r));
+  document.querySelectorAll('#layerchips .fchip, #relchips .fchip').forEach(c=>c.classList.add('on'));
+  applyFilters();
+};
+buildFilterChips();
+// Panel inicial con los ejemplos top-3 generados desde los datos.
+document.getElementById('panel').innerHTML = emptyPanelHTML();
+</script>
+</body>
+</html>
