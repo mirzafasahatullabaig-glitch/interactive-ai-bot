@@ -52,49 +52,82 @@ class Bot:
         self._prev_gray = None
         self._observe = False
         self._timer = None
+        self._warm_local()
 
     # ----- text route ----------------------------------------------------
     def chat(self, user_text):
+        """Stream the reply: yields text chunks. Falls back cloud->local
+        before the first chunk, so no half-printed wrong-provider output."""
         self.history.append({"role": "user", "content": user_text})
         sys_prompt = "You are a friendly, concise assistant."
         if self.observations:
             sys_prompt += " Recent things you have seen: " + \
                 "; ".join(self.observations[-3:])
-        messages = [{"role": "system", "content": sys_prompt}, *self.history]
+        # shortcut: cap history to last 8 turns so prompt stays short as chat
+        # grows; raise HISTORY_TURNS if you need longer memory.
+        turns = int(self.cfg.get("HISTORY_TURNS", 8))
+        messages = [{"role": "system", "content": sys_prompt},
+                    *self.history[-turns:]]
 
-        reply = self._try_text_cloud(messages) or self._try_text_local(messages)
-        if reply is None:
-            return "(All text providers failed, including local Ollama.)"
-        self.history.append({"role": "assistant", "content": reply})
-        return reply
+        stream = self._open_text_stream(messages)
+        if stream is None:
+            yield "(All text providers failed, including local Ollama.)"
+            return
+        parts = []
+        for piece in stream:
+            parts.append(piece)
+            yield piece
+        self.history.append({"role": "assistant", "content": "".join(parts)})
 
-    def _try_text_cloud(self, messages):
+    def _open_text_stream(self, messages):
+        """Return a generator of text chunks from the first working route, or
+        None. Pulls the first chunk here so a failed route falls through
+        BEFORE the caller prints anything."""
         for model in self._split(self.cfg["TEXT_MODELS"]):
             if self.store.in_cooldown(model, int(self.cfg["COOLDOWN_SEC"])):
                 continue
-            try:
-                r = self._cloud.chat.completions.create(model=model, messages=messages)
-                tok = getattr(getattr(r, "usage", None), "total_tokens", 0) or 0
-                self.store.record("text", model, "cloud", ok=True, tokens=tok)
-                return r.choices[0].message.content
-            except Exception as e:  # noqa: BLE001 - SDK raises varied types
-                err = _classify_error(e)
-                self.store.record("text", model, "cloud", ok=False, error=err)
-                if err not in TEMPORARY_ERRORS or err == "APIConnection":
-                    break  # permanent OR gateway unreachable -> siblings will fail too
+            gen, stop_cloud = self._stream_one(self._cloud, model, "cloud", messages)
+            if gen is not None:
+                return gen
+            if stop_cloud:
+                break  # permanent/connection error -> siblings on same gateway fail too
+        model = self.cfg.get("OLLAMA_TEXT_MODEL")
+        if model:
+            return self._stream_one(self._local, model, "local", messages)[0]
         return None
 
-    def _try_text_local(self, messages):
-        model = self.cfg.get("OLLAMA_TEXT_MODEL")
-        if not model:
-            return None
+    def _stream_one(self, client, model, source, messages):
+        """Start a streaming completion. Returns (generator, stop_cloud):
+        generator of chunks if the first chunk arrives, else None; stop_cloud
+        True if the failure means no sibling cloud model will work either."""
         try:
-            r = self._local.chat.completions.create(model=model, messages=messages)
-            self.store.record("text", model, "local", ok=True)
-            return r.choices[0].message.content
+            resp = client.chat.completions.create(
+                model=model, messages=messages, stream=True)
+            first = None
+            for chunk in resp:
+                d = chunk.choices[0].delta.content if chunk.choices else None
+                if d:
+                    first = d
+                    break
+            if first is None:          # empty stream -> treat as failure
+                self.store.record("text", model, source, ok=False, error="EmptyStream")
+                return None, False
         except Exception as e:  # noqa: BLE001
-            self.store.record("text", model, "local", ok=False, error=_classify_error(e))
-            return None
+            err = _classify_error(e)
+            self.store.record("text", model, source, ok=False, error=err)
+            stop = err not in TEMPORARY_ERRORS or err == "APIConnection"
+            return None, stop
+
+        def gen():
+            yield first
+            try:
+                for chunk in resp:
+                    d = chunk.choices[0].delta.content if chunk.choices else None
+                    if d:
+                        yield d
+            finally:
+                self.store.record("text", model, source, ok=True)
+        return gen(), False
 
     # ----- vision route --------------------------------------------------
     def analyze_image(self, jpg_bytes, prompt="Describe what you see.", automatic=False):
@@ -219,6 +252,22 @@ class Bot:
             self._schedule()  # always reschedule, even if this tick failed
 
     # ----- misc ----------------------------------------------------------
+    def _warm_local(self):
+        """Fire a 1-token Ollama request in the background so the model is
+        loaded before the first real chat (removes cold-start latency)."""
+        model = self.cfg.get("OLLAMA_TEXT_MODEL")
+        if not model or str(self.cfg.get("WARM_LOCAL", "1")) == "0":
+            return
+
+        def ping():
+            try:
+                self._local.chat.completions.create(
+                    model=model, messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1)
+            except Exception:  # noqa: BLE001 - warm-up is best-effort
+                pass
+        threading.Thread(target=ping, daemon=True).start()
+
     @staticmethod
     def _split(csv):
         return [m.strip() for m in csv.split(",") if m.strip()]

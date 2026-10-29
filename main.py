@@ -65,7 +65,9 @@ def main():
             elif line.startswith("/"):
                 print(f"Unknown command: {line}")
             else:
-                print(bot.chat(line))
+                for piece in bot.chat(line):   # stream: print as it generates
+                    print(piece, end="", flush=True)
+                print()
     finally:
         bot.shutdown()
         print("Bye.")
