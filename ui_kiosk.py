@@ -18,6 +18,7 @@ import threading
 import pygame
 
 import sysstat
+import touchfix
 from bot import Bot
 from main import load_cfg
 
@@ -235,7 +236,7 @@ class Kiosk:
                 elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                     running = False
                 elif e.type == pygame.MOUSEBUTTONDOWN and not self.busy:
-                    p = e.pos
+                    p = touchfix.transform(e.pos, W, H, touchfix.default_orient())
                     if TALK.collidepoint(p):
                         self.start(self._run_voice)
                     elif CAM.collidepoint(p):

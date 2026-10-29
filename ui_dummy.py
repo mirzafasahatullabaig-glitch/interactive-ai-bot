@@ -20,6 +20,8 @@ import os
 
 import pygame
 
+import touchfix
+
 W, H = 800, 480
 BG = (14, 16, 22)
 PANEL = (22, 26, 36)
@@ -58,9 +60,10 @@ def main():
     font = pygame.font.SysFont("dejavusans", 20)
     font_b = pygame.font.SysFont("dejavusans", 26, bold=True)
 
-    last_pos = None       # (x, y) of the most recent tap
+    last_pos = None       # (x, y) of the most recent tap (after transform)
     last_hit = None       # label of the button hit, or None
     taps = 0
+    orient = touchfix.default_orient()   # press 'n' to cycle live
 
     clock = pygame.time.Clock()
     running = True
@@ -70,17 +73,21 @@ def main():
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_n:
+                orient = (orient + 1) % touchfix.ORIENTS   # try next orientation
             elif e.type == pygame.MOUSEBUTTONDOWN:   # a tap (touch or mouse)
-                last_pos = e.pos
+                last_pos = touchfix.transform(e.pos, W, H, orient)
                 last_hit = next((lbl for lbl, r in BUTTONS
-                                 if r.collidepoint(e.pos)), None)
+                                 if r.collidepoint(last_pos)), None)
                 taps += 1
 
         screen.fill(BG)
         pygame.draw.rect(screen, PANEL, pygame.Rect(20, 20, 760, 344),
                          border_radius=14)
-        screen.blit(font.render("TOUCH TEST - a dot marks where you touched",
+        screen.blit(font.render("TOUCH TEST - press 'n' to rotate mapping",
                                 True, TXT), (40, 60))
+        screen.blit(font.render(f"orientation: {orient}  (set TOUCH_ORIENT="
+                                f"{orient} for the real UI)", True, HIT), (40, 80))
         pos_txt = f"last tap: {last_pos}" if last_pos else "last tap: (none yet)"
         screen.blit(font.render(pos_txt, True, TXT_DIM), (40, 100))
         screen.blit(font.render(f"hit button: {last_hit or '-'}", True, TXT_DIM),
