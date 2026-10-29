@@ -40,11 +40,7 @@ TYPE = pygame.Rect(600, 400, 180, 64)
 
 class Kiosk:
     def __init__(self):
-        if os.environ.get("UI_WINDOWED"):
-            self.screen = pygame.display.set_mode((W, H))
-        else:
-            # Framebuffer fullscreen on the Pi (no desktop).
-            self.screen = pygame.display.set_mode((W, H), pygame.FULLSCREEN)
+        self.screen = self._open_display()
         pygame.display.set_caption("Assistant")
         self.font = pygame.font.SysFont("dejavusans", 20)
         self.font_s = pygame.font.SysFont("dejavusans", 15)
@@ -57,6 +53,30 @@ class Kiosk:
         self.stats = sysstat.snapshot()
         self._stats_at = 0           # last poll time (poll ~1Hz, not per frame)
         self.add("bot", "Tap Talk and ask me something.")
+
+    @staticmethod
+    def _open_display():
+        """Open an 800x480 surface, trying video backends in order. A console
+        Pi (no desktop) has no X/Wayland, so kmsdrm (DRM/KMS) is the one that
+        works; UI_WINDOWED or an explicit SDL_VIDEODRIVER wins if set."""
+        if os.environ.get("UI_WINDOWED"):
+            pygame.display.init()
+            return pygame.display.set_mode((W, H))
+        # explicit override first, then the Pi console driver, then desktop
+        env = os.environ.get("SDL_VIDEODRIVER")
+        order = ([env] if env else []) + ["kmsdrm", "x11", "wayland"]
+        last = None
+        for drv in order:
+            try:
+                os.environ["SDL_VIDEODRIVER"] = drv
+                pygame.display.quit()
+                pygame.display.init()
+                return pygame.display.set_mode((W, H), pygame.FULLSCREEN)
+            except pygame.error as e:  # driver not available -> try next
+                last = f"{drv}: {e}"
+        raise SystemExit(f"No usable SDL video driver. Last error: {last}\n"
+                         "On a console Pi install one, e.g. kmsdrm support, "
+                         "or run under a desktop. Try UI_WINDOWED=1 on a PC.")
 
     def add(self, who, text):
         self.lines.append((who, text))
