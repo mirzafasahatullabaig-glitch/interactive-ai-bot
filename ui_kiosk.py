@@ -257,6 +257,7 @@ class Kiosk:
 
 def main():
     pygame.init()
+    pygame.mouse.set_visible(False)   # kiosk: taps only, no cursor
     Kiosk().run()
 
 
