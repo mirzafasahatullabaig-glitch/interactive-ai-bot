@@ -34,10 +34,16 @@ class Bot:
     def __init__(self, cfg, store=None):
         self.cfg = cfg
         self.store = store or UsageStore()
+        # Short timeout + no SDK retries: a dead free route should fail fast so
+        # we fall through to the next model / local, not stall ~14s per try.
+        ct = float(cfg.get("CLOUD_TIMEOUT_SEC", 8))
         self._cloud = OpenAI(base_url=cfg["OMNIROUTE_BASE_URL"],
-                             api_key=cfg["OMNIROUTE_API_KEY"])
+                             api_key=cfg["OMNIROUTE_API_KEY"],
+                             timeout=ct, max_retries=0)
         self._local = OpenAI(base_url=cfg["OLLAMA_BASE_URL"],
-                             api_key=cfg["OLLAMA_API_KEY"])
+                             api_key=cfg["OLLAMA_API_KEY"],
+                             timeout=float(cfg.get("LOCAL_TIMEOUT_SEC", 60)),
+                             max_retries=0)
         self.history = []            # chat memory for this session
         self.observations = []       # recent scene descriptions (context)
         self._cam = None
@@ -74,8 +80,8 @@ class Bot:
             except Exception as e:  # noqa: BLE001 - SDK raises varied types
                 err = _classify_error(e)
                 self.store.record("text", model, "cloud", ok=False, error=err)
-                if err not in TEMPORARY_ERRORS:
-                    break  # permanent (e.g. auth) -> other cloud models will fail too
+                if err not in TEMPORARY_ERRORS or err == "APIConnection":
+                    break  # permanent OR gateway unreachable -> siblings will fail too
         return None
 
     def _try_text_local(self, messages):
@@ -119,8 +125,8 @@ class Bot:
                 err = _classify_error(e)
                 self.store.record("vision", model, "cloud", ok=False,
                                  error=err, automatic=automatic)
-                if err not in TEMPORARY_ERRORS:
-                    break
+                if err not in TEMPORARY_ERRORS or err == "APIConnection":
+                    break  # permanent OR gateway unreachable -> siblings will fail too
         return None
 
     def _try_vision_local(self, messages, automatic):
