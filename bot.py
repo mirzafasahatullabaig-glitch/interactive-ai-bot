@@ -189,13 +189,19 @@ class Bot:
             return None
 
     # ----- camera --------------------------------------------------------
+    # OpenCV capture backend by CAMERA_BACKEND; same tree runs on Windows + Linux.
+    _BACKENDS = {"auto": 0, "dshow": cv2.CAP_DSHOW, "v4l2": cv2.CAP_V4L2}
+
     def _open_cam(self):
         if self._cam is None:
-            # CAP_DSHOW: avoids slow MSMF backend init on Windows.
-            self._cam = cv2.VideoCapture(int(self.cfg["CAMERA_INDEX"]), cv2.CAP_DSHOW)
+            # dshow avoids slow MSMF init on Windows; v4l2 for Linux/Pi USB cams;
+            # auto lets OpenCV pick. Any backend returns black frames until the
+            # sensor's auto-exposure settles, so discard the first few.
+            backend = self._BACKENDS.get(self.cfg.get("CAMERA_BACKEND", "auto"), 0)
+            self._cam = cv2.VideoCapture(int(self.cfg["CAMERA_INDEX"]), backend)
             self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.cfg["FRAME_WIDTH"]))
             self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.cfg["FRAME_HEIGHT"]))
-            self._warmup = 5  # discard first frames: DSHOW returns black until AE settles
+            self._warmup = 5  # discard first frames until auto-exposure settles
         return self._cam
 
     def capture_jpeg(self):
