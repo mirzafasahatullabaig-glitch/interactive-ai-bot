@@ -3,3 +3,4 @@ opencv-python>=4.10
 python-dotenv>=1.0
 faster-whisper>=1.0   # /voice speech-to-text (local, offline)
 sounddevice>=0.4      # mic capture for /voice
+pygame>=2.5           # ui_kiosk.py fullscreen touch UI (framebuffer, no desktop)

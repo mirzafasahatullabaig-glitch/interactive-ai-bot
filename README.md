@@ -10,6 +10,8 @@ webcam and describe scene changes.
 | `main.py` | Terminal REPL + command dispatch |
 | `bot.py` | Controller: text/vision routing, fallback, camera, scheduler |
 | `usage_store.py` | SQLite: call log, cooldowns, hourly observation budget |
+| `ui_kiosk.py` | Fullscreen 800x480 touch kiosk UI (pygame, framebuffer) |
+| `sysstat.py` | CPU/RAM/temp readout for the kiosk (stdlib, Pi `/proc`+`vcgencmd`) |
 | `voice_input.py` | `/voice` speech-to-text (faster-whisper, local/offline) |
 | `kb_store.py` | File-based RAG retriever (keyword overlap, stdlib only) |
 | `kb/*.jsonl` | Knowledge-base chunks injected into chat context (see `KB_PATH`) |
