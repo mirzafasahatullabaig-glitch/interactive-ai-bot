@@ -15,6 +15,7 @@ import time
 import cv2
 from openai import OpenAI
 
+from kb_store import KB
 from usage_store import UsageStore
 
 # Error classes that mean "temporary, try a backup / cool this model down".
@@ -46,6 +47,12 @@ class Bot:
                              max_retries=0)
         self.history = []            # chat memory for this session
         self.observations = []       # recent scene descriptions (context)
+        # Optional RAG knowledge base; absent/empty path -> disabled, no change.
+        kb_path = cfg.get("KB_PATH", "")
+        try:
+            self._kb = KB(kb_path) if kb_path else None
+        except OSError:
+            self._kb = None          # missing file shouldn't crash the bot
         self._cam = None
         self._warmup = 0
         self._cam_lock = threading.Lock()   # serialize camera access
@@ -60,6 +67,11 @@ class Bot:
         before the first chunk, so no half-printed wrong-provider output."""
         self.history.append({"role": "user", "content": user_text})
         sys_prompt = "You are a friendly, concise assistant."
+        if self._kb:
+            hits = self._kb.search(user_text)
+            if hits:
+                sys_prompt += ("\nUse these facts if relevant; cite the source:\n"
+                               + KB.as_context(hits))
         if self.observations:
             sys_prompt += " Recent things you have seen: " + \
                 "; ".join(self.observations[-3:])

@@ -10,7 +10,10 @@ webcam and describe scene changes.
 | `main.py` | Terminal REPL + command dispatch |
 | `bot.py` | Controller: text/vision routing, fallback, camera, scheduler |
 | `usage_store.py` | SQLite: call log, cooldowns, hourly observation budget |
+| `kb_store.py` | File-based RAG retriever (keyword overlap, stdlib only) |
+| `kb/*.jsonl` | Knowledge-base chunks injected into chat context (see `KB_PATH`) |
 | `test_routing.py` | Mocked tests for fallback logic (no network, no paid calls) |
+| `test_kb.py` | Self-check for the RAG retriever |
 | `.env.example` | Config template — copy to `.env`, never commit `.env` |
 
 ## Setup (PowerShell)

@@ -27,6 +27,7 @@ DEFAULTS = {
     "FRAME_WIDTH": "640", "FRAME_HEIGHT": "480",
     "SCENE_CHANGE_THRESHOLD": "12", "OBSERVE_INTERVAL_SEC": "10",
     "OBSERVE_HOURLY_BUDGET": "20", "COOLDOWN_SEC": "120",
+    "KB_PATH": "kb/geethanjali.jsonl",
 }
 
 
