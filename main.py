@@ -3,6 +3,7 @@
 Commands:
   <text>        chat (cloud -> local Ollama fallback)
   /cam          capture webcam now and describe it
+  /voice        record from the mic, transcribe locally, and chat it
   /observe on   start automatic scene-change observation
   /observe off  stop it
   /status       show usage, cooldowns, observation budget
@@ -28,6 +29,7 @@ DEFAULTS = {
     "SCENE_CHANGE_THRESHOLD": "12", "OBSERVE_INTERVAL_SEC": "10",
     "OBSERVE_HOURLY_BUDGET": "20", "COOLDOWN_SEC": "120",
     "KB_PATH": "kb/geethanjali.jsonl",
+    "VOICE_MODEL": "base", "VOICE_SECONDS": "5",
 }
 
 
@@ -37,6 +39,12 @@ def load_cfg():
     cfg.update({k: v for k, v in os.environ.items() if k in DEFAULTS})
     cfg.update({k: v for k, v in dotenv_values(".env").items() if v is not None})
     return cfg
+
+
+def stream_reply(bot, text):
+    for piece in bot.chat(text):   # stream: print as it generates
+        print(piece, end="", flush=True)
+    print()
 
 
 def main():
@@ -63,12 +71,18 @@ def main():
                 print("Observing stopped.")
             elif line == "/status":
                 print(bot.status())
+            elif line == "/voice":
+                print("Listening...", flush=True)
+                said = bot.listen()           # record + transcribe
+                if not said:
+                    print("(Heard nothing.)")
+                    continue
+                print(f"(heard) {said}")
+                stream_reply(bot, said)
             elif line.startswith("/"):
                 print(f"Unknown command: {line}")
             else:
-                for piece in bot.chat(line):   # stream: print as it generates
-                    print(piece, end="", flush=True)
-                print()
+                stream_reply(bot, line)
     finally:
         bot.shutdown()
         print("Bye.")

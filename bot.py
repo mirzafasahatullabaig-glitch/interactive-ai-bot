@@ -53,6 +53,7 @@ class Bot:
             self._kb = KB(kb_path) if kb_path else None
         except OSError:
             self._kb = None          # missing file shouldn't crash the bot
+        self._voice = None           # lazy: built on first /voice (see listen)
         self._cam = None
         self._warmup = 0
         self._cam_lock = threading.Lock()   # serialize camera access
@@ -229,6 +230,18 @@ class Bot:
             return "(Camera unavailable.)"
         desc = self.analyze_image(jpg, automatic=False)
         return desc or "(Image analysis unavailable: all vision routes failed.)"
+
+    # ----- voice input ---------------------------------------------------
+    def listen(self):
+        """/voice : record one utterance from the mic and return its transcript
+        ('' if silence). Builds the Voice engine (and loads the Whisper model)
+        on first use so startup and non-voice runs pay nothing."""
+        if self._voice is None:
+            from voice_input import Voice
+            self._voice = Voice(
+                model_size=self.cfg.get("VOICE_MODEL", "base"),
+                seconds=float(self.cfg.get("VOICE_SECONDS", 5)))
+        return self._voice.listen()
 
     # ----- observation scheduler ----------------------------------------
     def start_observing(self):
