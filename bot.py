@@ -41,6 +41,7 @@ class Bot:
         self.history = []            # chat memory for this session
         self.observations = []       # recent scene descriptions (context)
         self._cam = None
+        self._warmup = 0
         self._cam_lock = threading.Lock()   # serialize camera access
         self._prev_gray = None
         self._observe = False
@@ -142,12 +143,16 @@ class Bot:
             self._cam = cv2.VideoCapture(int(self.cfg["CAMERA_INDEX"]), cv2.CAP_DSHOW)
             self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.cfg["FRAME_WIDTH"]))
             self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.cfg["FRAME_HEIGHT"]))
+            self._warmup = 5  # discard first frames: DSHOW returns black until AE settles
         return self._cam
 
     def capture_jpeg(self):
         """Grab one frame as JPEG bytes, or None on failure. Thread-safe."""
         with self._cam_lock:
             cam = self._open_cam()
+            for _ in range(getattr(self, "_warmup", 0)):
+                cam.read()
+            self._warmup = 0
             ok, frame = cam.read()
             if not ok or frame is None:
                 return None, None
