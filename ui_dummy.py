@@ -18,6 +18,8 @@ import os
 
 import pygame
 
+from touchcal import Calib
+
 W, H = 800, 480
 BG = (14, 16, 22)
 PANEL = (22, 26, 36)
@@ -56,9 +58,18 @@ def main():
     font = pygame.font.SysFont("dejavusans", 20)
     font_b = pygame.font.SysFont("dejavusans", 26, bold=True)
 
-    last_pos = None       # (x, y) of the most recent tap
+    last_pos = None       # (x, y) of the most recent tap (after calibration)
     last_hit = None       # label of the button hit, or None
     taps = 0
+
+    # Calibration: tap the 4 on-screen targets to correct residual distortion.
+    # pygame already gives screen pixels; this fixes a linear offset/scale/flip
+    # left over from the overlay. Press 'c' to start, Esc to quit.
+    TARGETS = [(40, 40), (W - 40, 40), (40, H - 40), (W - 40, H - 40)]
+    calibrating = False
+    cal_idx = 0
+    cal_raw = []          # where pygame reported each target tap
+    calib = None          # Calib once solved
 
     clock = pygame.time.Clock()
     running = True
@@ -68,17 +79,43 @@ def main():
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_c:
+                calibrating, cal_idx, cal_raw, calib = True, 0, [], None
             elif e.type == pygame.MOUSEBUTTONDOWN:   # a tap (touch or mouse)
-                last_pos = e.pos
+                if calibrating:
+                    cal_raw.append(e.pos)            # reported tap for target
+                    cal_idx += 1
+                    if cal_idx >= 4:                 # all 4 corners collected
+                        tl, tr, bl, br = cal_raw
+                        calib = Calib.from_taps(tl, tr, bl, br, W, H)
+                        calibrating = False
+                    continue
+                pos = calib.apply(*e.pos) if calib else e.pos
+                last_pos = pos
                 last_hit = next((lbl for lbl, r in BUTTONS
-                                 if r.collidepoint(e.pos)), None)
+                                 if r.collidepoint(pos)), None)
                 taps += 1
 
         screen.fill(BG)
+
+        if calibrating:   # show just the current target to tap
+            tx, ty = TARGETS[cal_idx]
+            pygame.draw.circle(screen, HIT, (tx, ty), 16, 3)
+            pygame.draw.line(screen, HIT, (tx - 22, ty), (tx + 22, ty), 2)
+            pygame.draw.line(screen, HIT, (tx, ty - 22), (tx, ty + 22), 2)
+            msg = f"CALIBRATE: tap the ring  ({cal_idx + 1}/4)"
+            screen.blit(font.render(msg, True, TXT), (W // 2 - 140, H // 2))
+            pygame.display.flip()
+            clock.tick(20)
+            continue
+
         pygame.draw.rect(screen, PANEL, pygame.Rect(20, 20, 760, 344),
                          border_radius=14)
         screen.blit(font.render("TOUCH TEST - a dot marks where you touched",
                                 True, TXT), (40, 60))
+        cal_state = "ON" if calib else "OFF (press 'c' to calibrate)"
+        screen.blit(font.render(f"calibration: {cal_state}", True, TXT_DIM),
+                    (40, 190))
         pos_txt = f"last tap: {last_pos}" if last_pos else "last tap: (none yet)"
         screen.blit(font.render(pos_txt, True, TXT_DIM), (40, 100))
         screen.blit(font.render(f"hit button: {last_hit or '-'}", True, TXT_DIM),
