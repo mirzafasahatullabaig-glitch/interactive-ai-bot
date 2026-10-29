@@ -53,6 +53,20 @@ Recommended shape: pick the backend from config (e.g. a `CAMERA_BACKEND`
 env of `auto|v4l2|dshow`) so the same tree runs on both machines without an
 edit. Default `auto`.
 
+### 2.1b Voice input (/voice) on the Pi
+
+- `VOICE_MODEL`: use **`tiny`** on the Pi, not `base`. Smaller download (~75MB),
+  less RAM, faster CPU transcribe — accuracy drop is acceptable for short
+  commands.
+- Keep the Whisper model **lazy** (loaded on first `/voice`, as it is now).
+  Do NOT warm it at startup: on 4 GB, holding Whisper resident alongside the
+  3B Ollama model + OpenCV is what tips the box into swap. Pay the RAM only
+  when voice is actually used.
+- Recording already stops on silence, so there's no fixed wait and less audio
+  to transcribe — that's the main latency win and it helps the Pi most.
+- `faster-whisper` + `sounddevice` need `libsndfile`/PortAudio on the Pi:
+  `sudo apt install libportaudio2 libsndfile1`.
+
 ### 2.2 Local model size — `.env` only
 
 The Pi 4 has no usable GPU for LLMs; everything runs CPU-bound on Ollama.

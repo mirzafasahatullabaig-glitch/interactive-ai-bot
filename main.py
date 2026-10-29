@@ -30,6 +30,7 @@ DEFAULTS = {
     "OBSERVE_HOURLY_BUDGET": "20", "COOLDOWN_SEC": "120",
     "KB_PATH": "kb/geethanjali.jsonl",
     "VOICE_MODEL": "base", "VOICE_SECONDS": "5",
+    "VOICE_SILENCE_RMS": "0.01", "VOICE_HANG_SEC": "0.6",
 }
 
 

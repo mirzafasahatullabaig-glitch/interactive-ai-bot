@@ -240,7 +240,9 @@ class Bot:
             from voice_input import Voice
             self._voice = Voice(
                 model_size=self.cfg.get("VOICE_MODEL", "base"),
-                seconds=float(self.cfg.get("VOICE_SECONDS", 5)))
+                seconds=float(self.cfg.get("VOICE_SECONDS", 5)),
+                silence_rms=float(self.cfg.get("VOICE_SILENCE_RMS", 0.01)),
+                hang_seconds=float(self.cfg.get("VOICE_HANG_SEC", 0.6)))
         return self._voice.listen()
 
     # ----- observation scheduler ----------------------------------------
