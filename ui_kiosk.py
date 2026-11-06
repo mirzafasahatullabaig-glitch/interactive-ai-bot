@@ -69,32 +69,65 @@ class Kiosk:
         self.add("bot", "Tap Talk and ask me something.")
 
     def start_bluetooth(self):
-        """Accept a phone over Bluetooth in the background and feed its lines
-        into the same transcript, so the Pi screen mirrors the phone chat and
-        the phone gets the replies. No-op (logged on screen) if BT is
-        unavailable -- the kiosk stays usable by touch/voice regardless."""
-        try:
-            from bluetooth_input import BluetoothChannel
-            self.bt = BluetoothChannel()
-        except Exception as e:  # noqa: BLE001 - no radio / not Linux -> skip
-            self.add("bot", f"(Bluetooth off: {e})")
-            self.bt = None
-            return
+        """Start the Bluetooth server in the background. Binding happens inside
+        the thread with indefinite retry, because an RFCOMM channel freed by a
+        just-killed kiosk can stay bound in the kernel for up to a minute
+        (SO_REUSEADDR does NOT work for AF_BLUETOOTH). The UI starts right away
+        regardless; BT attaches as soon as the channel frees."""
         threading.Thread(target=self._bt_loop, daemon=True).start()
 
-    def _bt_loop(self):
-        self.events.put(("stream_bot", "Waiting for a phone over Bluetooth..."))
-        self.bt.wait_for_phone()
-        self.events.put(("stream_bot", "Phone connected."))
+    def _bind_bt(self):
+        """Bind the RFCOMM server, retrying until the channel is free. Returns
+        True once bound. Logs each failed attempt so a stuck channel is visible."""
+        from bluetooth_input import BluetoothChannel
+        delay = 2
         while True:
-            line = self.bt.readline().strip()
-            if not line:             # empty read == phone disconnected
-                self.events.put(("stream_bot", "Phone disconnected."))
-                return
-            # drive the normal chat path; _run_chat echoes to screen AND phone
-            while self.busy:         # one turn at a time; wait for the UI to free
-                time.sleep(0.05)
-            self._run_chat(line)
+            try:
+                self.bt = BluetoothChannel()
+                self._bt_log("bound RFCOMM channel 1")
+                return True
+            except OSError as e:          # [98] Address already in use -> wait
+                self.bt = None
+                self._bt_log(f"bind failed ({e}); retry in {delay}s")
+                time.sleep(delay)
+                delay = min(delay + 2, 10)
+            except Exception as e:  # noqa: BLE001 - no radio / not Linux -> give up
+                self.bt = None
+                self.events.put(("stream_bot", f"(Bluetooth off: {e})"))
+                self._bt_log(f"bluetooth off: {e}")
+                return False
+
+    def _bt_loop(self):
+        """Bind, then accept a phone, serve its lines, and when it disconnects
+        go back to waiting so a reconnect works without restarting the kiosk."""
+        if not self._bind_bt():
+            return
+        while True:                      # outer: one iteration per phone session
+            self.events.put(("stream_bot", "Waiting for a phone over Bluetooth..."))
+            self._bt_log("waiting for phone")
+            self.bt.wait_for_phone()
+            self.events.put(("stream_bot", "Phone connected."))
+            self._bt_log("phone connected")
+            while True:                  # inner: one iteration per message
+                line = self.bt.readline().strip()
+                self._bt_log(f"readline -> {line!r}")
+                if not line:             # empty read == phone disconnected
+                    self.events.put(("stream_bot", "Phone disconnected."))
+                    self._bt_log("phone disconnected; re-accepting")
+                    self.bt.reset_conn()  # drop dead conn, allow a fresh accept
+                    break                # back to wait_for_phone
+                while self.busy:         # one turn at a time; wait for UI to free
+                    time.sleep(0.05)
+                self._run_chat(line)
+                self._bt_log("reply sent to phone")
+
+    @staticmethod
+    def _bt_log(msg):
+        try:
+            with open("/tmp/kiosk_bt.log", "a") as f:
+                f.write(f"{time.time():.1f} {msg}\n")
+        except OSError:
+            pass
 
     @staticmethod
     def _open_display():
@@ -384,6 +417,16 @@ def main(bt=False):
     k = Kiosk()
     if bt:
         k.start_bluetooth()
+        # systemctl stop/restart sends SIGTERM; without a handler Python exits
+        # without running cleanup, orphaning the RFCOMM socket on channel 1 and
+        # blocking the next kiosk's bind. Close BT hard, then exit.
+        import signal
+
+        def _term(_sig, _frm):
+            if k.bt is not None:
+                k.bt.close()
+            raise SystemExit(0)
+        signal.signal(signal.SIGTERM, _term)
     k.run()
 
 
