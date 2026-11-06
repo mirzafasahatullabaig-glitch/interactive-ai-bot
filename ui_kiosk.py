@@ -118,8 +118,50 @@ class Kiosk:
                     break                # back to wait_for_phone
                 while self.busy:         # one turn at a time; wait for UI to free
                     time.sleep(0.05)
-                self._run_chat(line)
+                self.busy = True         # serialize with the touch UI
+                try:
+                    self._bt_dispatch(line)
+                finally:
+                    self.busy = False    # always free the UI, even on error
                 self._bt_log("reply sent to phone")
+
+    def _bt_dispatch(self, line):
+        """Handle a line from the phone. Slash-commands do their real job (the
+        app's mic/cam/status buttons send these); anything else is chat. The
+        phone's channel is text-only, so /voice records from the PI's mic and
+        /cam uses the Pi camera -- the phone just triggers them. Runs with
+        self.busy already True; _run_chat here is called directly (not via
+        start()) so it streams on this BT thread, and does NOT emit ("done")
+        -- the caller clears busy."""
+        if line == "/voice":
+            # record from the Pi mic (someone speaks near the kiosk), transcribe,
+            # then chat it. Tell the phone we're listening so it isn't left hanging.
+            self.bt.write("(listening at the kiosk...)\n")
+            self.events.put(("status", "listening"))
+            try:
+                said = self.bot.listen()
+            except Exception as e:  # noqa: BLE001
+                self.bt.write(f"(voice error: {e})\n")
+                return
+            if not said:
+                self.bt.write("(heard nothing)\n")
+                self.events.put(("status", "ready"))
+                return
+            self.bt.write(f"(heard) {said}\n")
+            self._run_chat(said)
+        elif line == "/cam":
+            self.events.put(("user", "[camera]"))
+            self.events.put(("status", "thinking"))
+            desc = self.bot.manual_cam()
+            self.events.put(("stream", desc))
+            self.events.put(("status", "ready"))
+            self.bt.write(desc + "\n")
+        elif line == "/status":
+            self.bt.write(self.bot.status() + "\n")
+        elif line.startswith("/"):
+            self.bt.write(f"(unknown command: {line})\n")
+        else:
+            self._run_chat(line)
 
     @staticmethod
     def _bt_log(msg):

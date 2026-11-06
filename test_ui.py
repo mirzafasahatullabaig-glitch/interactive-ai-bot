@@ -25,6 +25,9 @@ class FakeBot:
     def manual_cam(self):
         return "a desk"
 
+    def status(self):
+        return "all ok"
+
     def capture_frame_rgb(self):
         return None            # no cam in the stub -> grab loop takes else-branch
 
@@ -130,6 +133,43 @@ def main():
     k7.events.put(("stream_bot", "Phone connected."))
     k7.pump()
     assert k7.lines[-1] == ("bot", "Phone connected."), k7.lines
+
+    # _bt_dispatch routes slash-commands to real actions, not the LLM
+    class RecBT:
+        def __init__(self):
+            self.sent = []
+        def write(self, s):
+            self.sent.append(s)
+
+    k8, _ = make_kiosk()
+    k8.bt = RecBT()
+    k8._bt_dispatch("/status")                      # -> bot.status(), not chat
+    assert k8.bt.sent == ["all ok\n"], k8.bt.sent
+
+    k9, _ = make_kiosk()
+    k9.bt = RecBT()
+    k9._bt_dispatch("/cam")                         # -> manual_cam(), not chat
+    assert "a desk\n" in k9.bt.sent, k9.bt.sent
+
+    k10, _ = make_kiosk()
+    k10.bt = RecBT()
+    k10._bt_dispatch("/voice")                      # -> listen() then chat the result
+    assert any("listening" in s for s in k10.bt.sent), k10.bt.sent
+    assert any("voice question" in s for s in k10.bt.sent), k10.bt.sent
+    k10.pump()
+    assert k10.lines[0] == ("you", "voice question")  # heard text went to chat
+
+    k11, _ = make_kiosk()
+    k11.bt = RecBT()
+    k11._bt_dispatch("/bogus")                      # unknown slash-cmd, not chat
+    assert any("unknown command" in s for s in k11.bt.sent), k11.bt.sent
+
+    k12, _ = make_kiosk()
+    k12.bt = RecBT()
+    k12._bt_dispatch("hello there")                 # plain text -> chat
+    k12.pump()
+    assert k12.lines[0] == ("you", "hello there")
+    assert "hello world \n" in k12.bt.sent          # reply mirrored to phone
 
     print("ui tests OK")
 
