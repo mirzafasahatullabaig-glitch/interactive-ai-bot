@@ -255,6 +255,9 @@ class Kiosk:
     def open_cam(self):
         if self.cam_on:
             return
+        if self.bot.camera_disabled():   # dead GSPCA cam hangs on open; don't try
+            self.add("bot", "No camera: needs a UVC webcam. This one is unsupported.")
+            return
         self.cam_on = True
         self._cam_stop = threading.Event()
         threading.Thread(target=self._grab_loop, args=(self._cam_stop,),

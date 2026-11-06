@@ -261,8 +261,17 @@ class Bot:
         self._prev_gray = gray
         return diff > float(self.cfg["SCENE_CHANGE_THRESHOLD"])
 
+    def camera_disabled(self):
+        """True if CAMERA_DISABLED is set -- skip all OpenCV access. The Pi's
+        GSPCA webcam hangs forever on VideoCapture(open), which would freeze
+        whatever thread calls /cam; set CAMERA_DISABLED=1 until a UVC cam is
+        fitted, then clear it and the capture code works unchanged."""
+        return str(self.cfg.get("CAMERA_DISABLED", "0")) == "1"
+
     def manual_cam(self):
         """/cam : capture now and describe (priority, counts as non-automatic)."""
+        if self.camera_disabled():
+            return "(No camera: needs a UVC webcam. This one is unsupported.)"
         jpg, _ = self.capture_jpeg()
         if jpg is None:
             return "(Camera unavailable.)"

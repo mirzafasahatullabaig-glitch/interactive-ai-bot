@@ -28,6 +28,9 @@ class FakeBot:
     def status(self):
         return "all ok"
 
+    def camera_disabled(self):
+        return False
+
     def capture_frame_rgb(self):
         return None            # no cam in the stub -> grab loop takes else-branch
 
