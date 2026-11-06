@@ -252,13 +252,7 @@ class Bot:
         """/voice : record one utterance from the mic and return its transcript
         ('' if silence). Builds the Voice engine (and loads the Whisper model)
         on first use so startup and non-voice runs pay nothing."""
-        if self._voice is None:
-            from voice_input import Voice
-            self._voice = Voice(
-                model_size=self.cfg.get("VOICE_MODEL", "base"),
-                seconds=float(self.cfg.get("VOICE_SECONDS", 5)),
-                silence_rms=float(self.cfg.get("VOICE_SILENCE_RMS", 0.01)),
-                hang_seconds=float(self.cfg.get("VOICE_HANG_SEC", 0.6)))
+        self._warm_voice()   # builds the engine + loads Whisper if not already
         return self._voice.listen()
 
     # ----- observation scheduler ----------------------------------------
@@ -295,21 +289,68 @@ class Bot:
             self._schedule()  # always reschedule, even if this tick failed
 
     # ----- misc ----------------------------------------------------------
+    # 1x1 white JPEG (base64) -- smallest image that loads the vision weights.
+    _TINY_JPG = ("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//"
+                 "//////////////////////////////////////////////////////////"
+                 "//////////////////////////////////////////2wBDAf//////////"
+                 "//////////////////////////////////////////////////////////"
+                 "////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QA"
+                 "FQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QA"
+                 "FQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oA"
+                 "DAMBAAIRAxEAPwCdABmX/9k=")
+
     def _warm_local(self):
-        """Fire a 1-token Ollama request in the background so the model is
-        loaded before the first real chat (removes cold-start latency)."""
-        model = self.cfg.get("OLLAMA_TEXT_MODEL")
-        if not model or str(self.cfg.get("WARM_LOCAL", "1")) == "0":
+        """Load every local model into RAM in the background before the first
+        real request, so nothing cold-starts mid-conversation. Best-effort:
+        each warm is independent and a missing/failed one is skipped.
+        Vision is only warmed if a camera actually opens -- otherwise pinning
+        ~2 GB for a model that can never be reached is pure waste."""
+        if str(self.cfg.get("WARM_LOCAL", "1")) == "0":
             return
 
-        def ping():
+        def warm():
+            text = self.cfg.get("OLLAMA_TEXT_MODEL")
+            if text:
+                try:
+                    self._local.chat.completions.create(
+                        model=text, messages=[{"role": "user", "content": "hi"}],
+                        max_tokens=1, extra_body={"keep_alive": -1})
+                except Exception:  # noqa: BLE001
+                    pass
+            vision = self.cfg.get("OLLAMA_VISION_MODEL")
+            if vision and self._camera_works():
+                try:
+                    self._local.chat.completions.create(
+                        model=vision, max_tokens=1, extra_body={"keep_alive": -1},
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": "hi"},
+                            {"type": "image_url", "image_url": {"url": self._TINY_JPG}}]}])
+                except Exception:  # noqa: BLE001
+                    pass
             try:
-                self._local.chat.completions.create(
-                    model=model, messages=[{"role": "user", "content": "hi"}],
-                    max_tokens=1)
-            except Exception:  # noqa: BLE001 - warm-up is best-effort
+                self._warm_voice()
+            except Exception:  # noqa: BLE001
                 pass
-        threading.Thread(target=ping, daemon=True).start()
+        threading.Thread(target=warm, daemon=True).start()
+
+    def _camera_works(self):
+        """True if a frame can actually be grabbed. Cached so we probe once."""
+        if getattr(self, "_cam_ok", None) is None:
+            jpg, _ = self.capture_jpeg()
+            self._cam_ok = jpg is not None
+        return self._cam_ok
+
+    def _warm_voice(self):
+        """Build the Voice engine and load the Whisper model so the first
+        /voice doesn't stall on model load."""
+        if self._voice is None:
+            from voice_input import Voice
+            self._voice = Voice(
+                model_size=self.cfg.get("VOICE_MODEL", "base"),
+                seconds=float(self.cfg.get("VOICE_SECONDS", 5)),
+                silence_rms=float(self.cfg.get("VOICE_SILENCE_RMS", 0.01)),
+                hang_seconds=float(self.cfg.get("VOICE_HANG_SEC", 0.6)))
+        self._voice._load()  # force the Whisper model into RAM now
 
     @staticmethod
     def _split(csv):
