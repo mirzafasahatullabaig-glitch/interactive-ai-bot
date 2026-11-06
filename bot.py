@@ -67,7 +67,13 @@ class Bot:
         """Stream the reply: yields text chunks. Falls back cloud->local
         before the first chunk, so no half-printed wrong-provider output."""
         self.history.append({"role": "user", "content": user_text})
-        sys_prompt = "You are a friendly, concise assistant."
+        sys_prompt = (
+            "You are the front-desk assistant for Geethanjali College. "
+            "Answer in 1-3 short sentences, plainly and confidently. "
+            "Use only the facts given below or what you are certain of; "
+            "if you do not know, say so briefly and suggest who to ask. "
+            "Never invent names, numbers, dates or sources."
+        )
         if self._kb:
             hits = self._kb.search(user_text)
             if hits:
