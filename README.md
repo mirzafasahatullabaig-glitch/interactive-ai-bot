@@ -36,7 +36,25 @@ at least one free provider, and have Ollama running with the models named in
 
 ## Commands
 `<text>` chat · `/cam` describe webcam now · `/observe on|off` auto-watch ·
-`/status` usage stats · `/quit`
+`/status` usage stats · `/voice` mic → transcribe → chat · `/quit`
+Run with `--bt` to drive it from a phone over Bluetooth (see below).
+
+## Phone over Bluetooth (replaces the touchscreen)
+Run `python main.py --bt` to take input from a phone instead of the keyboard:
+the phone is the keyboard+screen over an RFCOMM/SPP serial link, so any
+"Bluetooth serial terminal" app works (no custom app). Stdlib sockets only.
+
+One-time Pi setup (sudo):
+```
+sudo rfkill unblock bluetooth
+sudo hciconfig hci0 up && sudo hciconfig hci0 piscan
+# SPP discovery needs bluetoothd in compat mode, else sdptool is a silent no-op:
+sudo sed -i 's|bluetoothd|bluetoothd --compat|' /lib/systemd/system/bluetooth.service
+sudo systemctl daemon-reload && sudo systemctl restart bluetooth
+sudo sdptool add --channel=1 SP && sudo chmod 666 /var/run/sdp
+```
+Pair the phone once with `bluetoothctl` (agent on; confirm passkey; `trust <mac>`),
+then connect from the app to the advertised Serial Port on channel 1.
 
 ## What needs internet
 Cloud text + all cloud vision (through OmniRoute). Camera capture, scene-change

@@ -43,52 +43,69 @@ def load_cfg():
     return cfg
 
 
-def stream_reply(bot, text):
-    for piece in bot.chat(text):   # stream: print as it generates
-        print(piece, end="", flush=True)
-    print()
+def stream_reply(bot, text, emit):
+    for piece in bot.chat(text):   # stream: emit as it generates
+        emit(piece)
+    emit("\n")
 
 
-def main():
+def main(bt=False):
     cfg = load_cfg()
     bot = Bot(cfg)
-    print("Interactive AI Bot v0.1. Type /quit to exit, /status for stats.")
+    chan = None
+    if bt:
+        from bluetooth_input import BluetoothChannel
+        chan = BluetoothChannel()
+        print("Waiting for a phone over Bluetooth (SPP channel 1)...")
+        print("Connected:", chan.wait_for_phone())
+        read_line = chan.readline
+        emit = chan.write
+    else:
+        read_line = lambda: input("> ").strip()
+        emit = lambda s: print(s, end="", flush=True)
+
+    emit("Interactive AI Bot v0.1. Type /quit to exit, /status for stats.\n")
     try:
         while True:
             try:
-                line = input("> ").strip()
+                line = read_line().strip()
             except (EOFError, KeyboardInterrupt):
                 break
             if not line:
+                if bt:  # SPP sends \n per line; empty read means the phone closed
+                    break
                 continue
             if line == "/quit":
                 break
             elif line == "/cam":
-                print(bot.manual_cam())
+                emit(bot.manual_cam() + "\n")
             elif line == "/observe on":
                 bot.start_observing()
-                print("Observing started.")
+                emit("Observing started.\n")
             elif line == "/observe off":
                 bot.stop_observing()
-                print("Observing stopped.")
+                emit("Observing stopped.\n")
             elif line == "/status":
-                print(bot.status())
+                emit(bot.status() + "\n")
             elif line == "/voice":
-                print("Listening...", flush=True)
+                emit("Listening...\n")
                 said = bot.listen()           # record + transcribe
                 if not said:
-                    print("(Heard nothing.)")
+                    emit("(Heard nothing.)\n")
                     continue
-                print(f"(heard) {said}")
-                stream_reply(bot, said)
+                emit(f"(heard) {said}\n")
+                stream_reply(bot, said, emit)
             elif line.startswith("/"):
-                print(f"Unknown command: {line}")
+                emit(f"Unknown command: {line}\n")
             else:
-                stream_reply(bot, line)
+                stream_reply(bot, line, emit)
     finally:
         bot.shutdown()
+        if chan is not None:
+            chan.close()
         print("Bye.")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(bt="--bt" in sys.argv)
