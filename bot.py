@@ -112,10 +112,20 @@ class Bot:
                 break  # permanent/connection error -> siblings on same gateway fail too
         model = self.cfg.get("OLLAMA_TEXT_MODEL")
         if model:
-            # Cap local replies so a small Pi CPU can't ramble for 30s, and pin
-            # the model in RAM (keep_alive) so an idle gap doesn't force a reload.
-            extra = {"max_tokens": 120,
-                     "extra_body": {"keep_alive": -1}}
+            # Reply time on a Pi is tokens x ~2.9 tok/s, so a short cap is the
+            # biggest speed lever; the front-desk role only needs 1-3 sentences.
+            # keep_alive pins the model in RAM; num_ctx/num_thread trim prompt
+            # processing and use all cores. All tunable from .env.
+            extra = {
+                "max_tokens": int(self.cfg.get("MAX_REPLY_TOKENS", 48)),
+                "extra_body": {
+                    "keep_alive": -1,
+                    "options": {
+                        "num_ctx": int(self.cfg.get("OLLAMA_NUM_CTX", 1024)),
+                        "num_thread": int(self.cfg.get("OLLAMA_NUM_THREAD", 4)),
+                    },
+                },
+            }
             return self._stream_one(self._local, model, "local", messages, extra)[0]
         return None
 
