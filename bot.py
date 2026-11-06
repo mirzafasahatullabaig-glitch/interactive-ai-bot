@@ -228,6 +228,28 @@ class Bot:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             return (buf.tobytes() if ok else None), gray
 
+    def capture_frame_rgb(self):
+        """Grab one raw frame as a (w, h, RGB) numpy array for live on-screen
+        preview, or None. RGB (not BGR) because pygame wants RGB; no JPEG
+        encode because this runs many times a second. Thread-safe."""
+        with self._cam_lock:
+            cam = self._open_cam()
+            for _ in range(getattr(self, "_warmup", 0)):
+                cam.read()
+            self._warmup = 0
+            ok, frame = cam.read()
+            if not ok or frame is None:
+                return None
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    def release_cam(self):
+        """Free the camera so it isn't held open between uses (a Pi shouldn't
+        keep the sensor powered when no preview is on screen)."""
+        with self._cam_lock:
+            if self._cam is not None:
+                self._cam.release()
+                self._cam = None
+
     def scene_changed(self, gray):
         """Mean per-pixel grayscale diff vs previous frame > threshold."""
         if gray is None:

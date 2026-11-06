@@ -14,6 +14,7 @@ panel is single-touch and imprecise.
 import os
 import queue
 import threading
+import time
 
 import pygame
 
@@ -32,11 +33,18 @@ ACCENT_WARM = (250, 190, 60)     # thinking
 TXT = (230, 234, 240)
 TXT_DIM = (140, 150, 165)
 USER = (120, 200, 160)
+BUBBLE_ME = (38, 66, 104)        # user bubble: accent-tinted, right-aligned
+BUBBLE_BOT = (34, 40, 52)        # bot bubble: raised panel, left-aligned
 
 # Buttons: (label, id, rect). Big targets for resistive touch.
 TALK = pygame.Rect(20, 400, 360, 64)
 CAM = pygame.Rect(400, 400, 180, 64)
 TYPE = pygame.Rect(600, 400, 180, 64)
+
+# Live-cam overlay: a centered feed with Describe / Close under it.
+CAM_VIEW = pygame.Rect(160, 40, 480, 360)   # 4:3 feed, matches 640x480 source
+CAM_DESC = pygame.Rect(160, 412, 300, 56)
+CAM_CLOSE = pygame.Rect(480, 412, 160, 56)
 
 
 class Kiosk:
@@ -53,7 +61,40 @@ class Kiosk:
         self.busy = False
         self.stats = sysstat.snapshot()
         self._stats_at = 0           # last poll time (poll ~1Hz, not per frame)
+        self.cam_on = False          # live-preview overlay open?
+        self._frame = None           # latest camera frame as a pygame Surface
+        self._frame_lock = threading.Lock()
+        self._cam_stop = None        # Event to stop the grab thread
+        self.bt = None               # optional Bluetooth phone channel
         self.add("bot", "Tap Talk and ask me something.")
+
+    def start_bluetooth(self):
+        """Accept a phone over Bluetooth in the background and feed its lines
+        into the same transcript, so the Pi screen mirrors the phone chat and
+        the phone gets the replies. No-op (logged on screen) if BT is
+        unavailable -- the kiosk stays usable by touch/voice regardless."""
+        try:
+            from bluetooth_input import BluetoothChannel
+            self.bt = BluetoothChannel()
+        except Exception as e:  # noqa: BLE001 - no radio / not Linux -> skip
+            self.add("bot", f"(Bluetooth off: {e})")
+            self.bt = None
+            return
+        threading.Thread(target=self._bt_loop, daemon=True).start()
+
+    def _bt_loop(self):
+        self.events.put(("stream_bot", "Waiting for a phone over Bluetooth..."))
+        self.bt.wait_for_phone()
+        self.events.put(("stream_bot", "Phone connected."))
+        while True:
+            line = self.bt.readline().strip()
+            if not line:             # empty read == phone disconnected
+                self.events.put(("stream_bot", "Phone disconnected."))
+                return
+            # drive the normal chat path; _run_chat echoes to screen AND phone
+            while self.busy:         # one turn at a time; wait for the UI to free
+                time.sleep(0.05)
+            self._run_chat(line)
 
     @staticmethod
     def _open_display():
@@ -94,6 +135,8 @@ class Kiosk:
                 self.events.put(("stream", "".join(parts)))
         except Exception as e:  # noqa: BLE001 - surface failures on screen
             self.events.put(("stream", f"(error: {e})"))
+        if self.bt is not None:      # mirror the reply back to the phone
+            self.bt.write("".join(parts) + "\n")
         self.events.put(("done", None))
 
     def _run_voice(self):
@@ -118,6 +161,40 @@ class Kiosk:
         self.events.put(("stream", desc))
         self.events.put(("done", None))
 
+    # ----- live camera overlay --------------------------------------------
+    def _grab_loop(self, stop):
+        """Background: pull RGB frames into a Surface for the UI to blit.
+        Runs ~15fps; never touches pygame display, only builds a Surface."""
+        while not stop.is_set():
+            rgb = self.bot.capture_frame_rgb()
+            if rgb is not None:
+                # numpy (h,w,3) -> pygame wants (w,h,3); swapaxes, don't copy twice
+                surf = pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
+                with self._frame_lock:
+                    self._frame = surf
+            else:
+                with self._frame_lock:
+                    self._frame = None   # cam gone -> show "no signal"
+            time.sleep(1 / 15)
+
+    def open_cam(self):
+        if self.cam_on:
+            return
+        self.cam_on = True
+        self._cam_stop = threading.Event()
+        threading.Thread(target=self._grab_loop, args=(self._cam_stop,),
+                         daemon=True).start()
+
+    def close_cam(self):
+        if not self.cam_on:
+            return
+        self.cam_on = False
+        if self._cam_stop:
+            self._cam_stop.set()
+        with self._frame_lock:
+            self._frame = None
+        self.bot.release_cam()   # don't hold the sensor open when not previewing
+
     def start(self, target, *args):
         if self.busy:
             return
@@ -132,6 +209,8 @@ class Kiosk:
                 if kind == "user":
                     self.add("you", val)
                     self.add("bot", "")        # placeholder to stream into
+                elif kind == "stream_bot":     # standalone bot notice (BT status)
+                    self.add("bot", val)
                 elif kind == "stream":
                     if self.lines and self.lines[-1][0] == "bot":
                         self.lines[-1] = ("bot", val)
@@ -166,24 +245,57 @@ class Kiosk:
         t = self.font_b.render(label, True, color if enabled else TXT_DIM)
         self.screen.blit(t, t.get_rect(center=rect.center))
 
+    def draw_cam(self):
+        """Live preview overlay: scale the latest frame into CAM_VIEW."""
+        self.screen.fill(BG)
+        with self._frame_lock:
+            frame = self._frame
+        pygame.draw.rect(self.screen, PANEL, CAM_VIEW, border_radius=12)
+        if frame is not None:
+            self.screen.blit(pygame.transform.smoothscale(frame, CAM_VIEW.size),
+                             CAM_VIEW.topleft)
+        else:
+            msg = self.font.render("No camera signal", True, TXT_DIM)
+            self.screen.blit(msg, msg.get_rect(center=CAM_VIEW.center))
+        pygame.draw.rect(self.screen, ACCENT, CAM_VIEW, 2, border_radius=12)
+        # if a describe is running, the status line shows it
+        busy = self.busy and self.status == "thinking"
+        self._button(CAM_DESC, "Describing..." if busy else "Describe",
+                     ACCENT_WARM if busy else ACCENT, not busy)
+        self._button(CAM_CLOSE, "Close", ACCENT_HOT)
+        pygame.display.flip()
+
     def draw(self):
+        if self.cam_on:
+            self.draw_cam()
+            return
         self.screen.fill(BG)
         # transcript panel (shortened to leave room for the stats bar)
         panel = pygame.Rect(20, 20, 760, 344)
         pygame.draw.rect(self.screen, PANEL, panel, border_radius=14)
-        # render newest-last, clipped to the panel from the bottom up
-        y = panel.bottom - 14
+        # chat bubbles, newest at the bottom, clipped to the panel bottom-up.
+        self.screen.set_clip(panel)
+        maxw = int(panel.w * 0.72)       # a bubble is at most ~3/4 the panel
+        pad, lh, gap = 10, 24, 8         # text padding, line height, bubble gap
+        y = panel.bottom - 12
         for who, text in reversed(self.lines):
-            color = USER if who == "you" else (TXT if who == "bot" else TXT_DIM)
-            prefix = "You: " if who == "you" else ("" if who == "bot" else "")
-            wrapped = self._wrap(prefix + (text or "..."), self.font, panel.w - 28)
-            for ln in reversed(wrapped):
-                y -= 26
-                if y < panel.top + 10:
-                    break
-                self.screen.blit(self.font.render(ln, True, color), (panel.x + 14, y))
-            if y < panel.top + 10:
+            mine = who == "you"
+            wrapped = self._wrap(text or "...", self.font, maxw - 2 * pad)
+            bw = max(self.font.size(ln)[0] for ln in wrapped) + 2 * pad
+            bh = len(wrapped) * lh + 2 * pad - 4
+            y -= bh
+            bx = panel.right - 14 - bw if mine else panel.x + 14
+            bubble = pygame.Rect(bx, y, bw, bh)
+            fill = BUBBLE_ME if mine else BUBBLE_BOT
+            pygame.draw.rect(self.screen, fill, bubble, border_radius=12)
+            ty = y + pad - 2
+            for ln in wrapped:
+                self.screen.blit(self.font.render(ln, True, TXT), (bx + pad, ty))
+                ty += lh
+            y -= gap
+            if y < panel.top + 6:
                 break
+        self.screen.set_clip(None)
         # status dot + label
         dotc = {"ready": ACCENT, "listening": ACCENT_HOT,
                 "thinking": ACCENT_WARM}[self.status]
@@ -235,12 +347,19 @@ class Kiosk:
                     running = False
                 elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                     running = False
-                elif e.type == pygame.MOUSEBUTTONDOWN and not self.busy:
+                elif e.type == pygame.MOUSEBUTTONDOWN:
                     p = touchfix.transform(e.pos, W, H, touchfix.default_orient())
-                    if TALK.collidepoint(p):
+                    if self.cam_on:
+                        if CAM_CLOSE.collidepoint(p):
+                            self.close_cam()
+                        elif CAM_DESC.collidepoint(p) and not self.busy:
+                            self.start(self._run_cam)   # describe current scene
+                    elif self.busy:
+                        pass   # ignore taps while a reply is in flight
+                    elif TALK.collidepoint(p):
                         self.start(self._run_voice)
                     elif CAM.collidepoint(p):
-                        self.start(self._run_cam)
+                        self.open_cam()                 # live preview overlay
                     elif TYPE.collidepoint(p):
                         txt = self.type_prompt()
                         if txt:
@@ -252,15 +371,22 @@ class Kiosk:
                 self._stats_at = now
             self.draw()
             clock.tick(20)   # 20fps is plenty for a chat UI; easy on the Pi
+        self.close_cam()     # stop the grab thread before releasing the bot
+        if self.bt is not None:
+            self.bt.close()
         self.bot.shutdown()
         pygame.quit()
 
 
-def main():
+def main(bt=False):
     pygame.init()
     pygame.mouse.set_visible(False)   # kiosk: taps only, no cursor
-    Kiosk().run()
+    k = Kiosk()
+    if bt:
+        k.start_bluetooth()
+    k.run()
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(bt="--bt" in sys.argv)

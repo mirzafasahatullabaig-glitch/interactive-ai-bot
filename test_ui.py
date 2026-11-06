@@ -4,6 +4,8 @@ no display -- tests the queue/pump logic that is the only non-trivial part
 thread's widgets). Run: python test_ui.py
 """
 import queue
+import threading
+import time
 import types
 
 
@@ -22,6 +24,12 @@ class FakeBot:
 
     def manual_cam(self):
         return "a desk"
+
+    def capture_frame_rgb(self):
+        return None            # no cam in the stub -> grab loop takes else-branch
+
+    def release_cam(self):
+        self.released = True
 
     def shutdown(self):
         pass
@@ -45,6 +53,11 @@ def make_kiosk():
     k.status = "ready"
     k.events = queue.Queue()
     k.busy = False
+    k.cam_on = False
+    k._frame = None
+    k._frame_lock = threading.Lock()
+    k._cam_stop = None
+    k.bt = None
     return k, mod
 
 
@@ -84,6 +97,39 @@ def main():
     for i in range(60):
         k4.add("bot", str(i))
     assert len(k4.lines) == 40 and k4.lines[-1] == ("bot", "59")
+
+    # live-cam overlay: open starts the grab thread, close stops it + releases
+    k5, _ = make_kiosk()
+    k5.open_cam()
+    assert k5.cam_on and k5._cam_stop is not None
+    time.sleep(0.2)                       # let the grab loop run (cam returns None)
+    assert k5._frame is None              # no-signal path set it to None, no crash
+    k5.close_cam()
+    assert not k5.cam_on and k5._cam_stop.is_set()
+    assert getattr(k5.bot, "released", False), "close_cam must release the camera"
+    k5.open_cam()                         # idempotent-ish: reopen after close works
+    assert k5.cam_on
+    k5.close_cam()
+
+    # Bluetooth: a chat turn mirrors the reply back to the phone channel
+    k6, _ = make_kiosk()
+
+    class FakeBT:
+        def __init__(self):
+            self.sent = []
+        def write(self, s):
+            self.sent.append(s)
+    k6.bt = FakeBT()
+    k6._run_chat("hi there")
+    k6.pump()
+    assert k6.bt.sent == ["hello world \n"], k6.bt.sent   # reply echoed to phone
+    assert k6.lines[0] == ("you", "hi there")             # and shown on screen
+
+    # stream_bot event adds a standalone bot notice (BT status lines)
+    k7, _ = make_kiosk()
+    k7.events.put(("stream_bot", "Phone connected."))
+    k7.pump()
+    assert k7.lines[-1] == ("bot", "Phone connected."), k7.lines
 
     print("ui tests OK")
 
