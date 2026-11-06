@@ -112,16 +112,20 @@ class Bot:
                 break  # permanent/connection error -> siblings on same gateway fail too
         model = self.cfg.get("OLLAMA_TEXT_MODEL")
         if model:
-            return self._stream_one(self._local, model, "local", messages)[0]
+            # Cap local replies so a small Pi CPU can't ramble for 30s, and pin
+            # the model in RAM (keep_alive) so an idle gap doesn't force a reload.
+            extra = {"max_tokens": 120,
+                     "extra_body": {"keep_alive": -1}}
+            return self._stream_one(self._local, model, "local", messages, extra)[0]
         return None
 
-    def _stream_one(self, client, model, source, messages):
+    def _stream_one(self, client, model, source, messages, extra=None):
         """Start a streaming completion. Returns (generator, stop_cloud):
         generator of chunks if the first chunk arrives, else None; stop_cloud
         True if the failure means no sibling cloud model will work either."""
         try:
             resp = client.chat.completions.create(
-                model=model, messages=messages, stream=True)
+                model=model, messages=messages, stream=True, **(extra or {}))
             first = None
             for chunk in resp:
                 d = chunk.choices[0].delta.content if chunk.choices else None
