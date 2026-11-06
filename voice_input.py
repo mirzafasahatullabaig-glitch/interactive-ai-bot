@@ -11,6 +11,7 @@ import numpy as np
 import sounddevice as sd
 
 SAMPLE_RATE = 16000  # what Whisper expects
+CAPTURE_RATE = 48000 # many USB mics refuse 16k; capture native, decimate to 16k (48000/16000=3)
 _BLOCK = 0.1         # seconds per captured block (silence resolution)
 
 
@@ -51,17 +52,18 @@ class Voice:
     def record(self):
         """Capture mono 16k audio, stopping ~hang_seconds after speech ends or
         at `seconds`, whichever comes first. Returns a float32 numpy array."""
-        block_frames = int(_BLOCK * SAMPLE_RATE)
+        block_frames = int(_BLOCK * CAPTURE_RATE)
         max_blocks = max(1, int(self.seconds / _BLOCK))
         hang_blocks = max(1, int(self.hang_seconds / _BLOCK))
         blocks = []
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+        with sd.InputStream(samplerate=CAPTURE_RATE, channels=1, dtype="float32",
                             blocksize=block_frames, device=self.device) as stream:
             for _ in range(max_blocks):
                 data, _overflow = stream.read(block_frames)
                 samples = data.reshape(-1)
                 blocks.append((float(np.sqrt(np.mean(samples ** 2))), samples))
-        return _trim_endpoint(blocks, self.silence_rms, hang_blocks)
+        audio = _trim_endpoint(blocks, self.silence_rms, hang_blocks)
+        return audio[:: CAPTURE_RATE // SAMPLE_RATE]  # decimate to 16k for Whisper
 
     def transcribe(self, audio):
         """Return the recognized text (stripped), or '' if nothing was said."""
