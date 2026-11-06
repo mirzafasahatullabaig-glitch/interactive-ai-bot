@@ -316,11 +316,16 @@ class Kiosk:
             lines.append(cur)
         return lines or [""]
 
-    def _button(self, rect, label, color, enabled=True):
-        pygame.draw.rect(self.screen, PANEL, rect, border_radius=12)
-        pygame.draw.rect(self.screen, color if enabled else TXT_DIM, rect, 2,
-                         border_radius=12)
-        t = self.font_b.render(label, True, color if enabled else TXT_DIM)
+    def _button(self, rect, label, color, enabled=True, filled=False):
+        if filled and enabled:           # solid accent fill, dark label
+            pygame.draw.rect(self.screen, color, rect, border_radius=16)
+            label_col = BG
+        else:                            # outlined on the panel
+            pygame.draw.rect(self.screen, PANEL, rect, border_radius=16)
+            pygame.draw.rect(self.screen, color if enabled else TXT_DIM, rect, 2,
+                             border_radius=16)
+            label_col = color if enabled else TXT_DIM
+        t = self.font_b.render(label, True, label_col)
         self.screen.blit(t, t.get_rect(center=rect.center))
 
     def draw_cam(self):
@@ -374,18 +379,22 @@ class Kiosk:
             if y < panel.top + 6:
                 break
         self.screen.set_clip(None)
-        # status dot + label
+        # status pill (dot + label) in the panel's top-right corner
         dotc = {"ready": ACCENT, "listening": ACCENT_HOT,
                 "thinking": ACCENT_WARM}[self.status]
-        pygame.draw.circle(self.screen, dotc, (panel.right - 20, panel.top + 18), 7)
-        self.screen.blit(self.font_s.render(self.status, True, dotc),
-                         (panel.right - 110, panel.top + 10))
+        label = self.font_s.render(self.status, True, dotc)
+        pill = pygame.Rect(0, 0, label.get_width() + 34, 26)
+        pill.topright = (panel.right - 12, panel.top + 10)
+        pygame.draw.rect(self.screen, BG, pill, border_radius=13)
+        pygame.draw.circle(self.screen, dotc, (pill.x + 14, pill.centery), 5)
+        self.screen.blit(label, (pill.x + 24, pill.centery - label.get_height() // 2))
         # system stats bar (CPU / RAM / temp)
         stat_txt = sysstat.fmt(self.stats)
-        self.screen.blit(self.font_s.render(stat_txt, True, TXT_DIM), (24, 372))
-        # buttons
+        self.screen.blit(self.font_s.render(stat_txt, True, TXT_DIM), (24, 374))
+        # buttons: TALK is the primary action (filled), Cam/Type are outlined
         talk_c = ACCENT_HOT if self.status == "listening" else ACCENT
-        self._button(TALK, "TALK" if not self.busy else "...", talk_c, not self.busy)
+        self._button(TALK, "TALK" if not self.busy else "...", talk_c,
+                     not self.busy, filled=True)
         self._button(CAM, "Cam", ACCENT, not self.busy)
         self._button(TYPE, "Type", ACCENT, not self.busy)
         pygame.display.flip()
